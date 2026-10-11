@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docconvert"
+version = "0.1.0"
+description = "Convert PDF textbooks, papers and technical docs into a single cleaned text/markdown file using docling."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "docling>=2.100",
+]
+
+[project.optional-dependencies]
+easyocr = ["easyocr>=1.7"]
+
+[project.scripts]
+docconvert = "docconvert.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["source"]
+
+[tool.setuptools.package-data]
+docconvert = ["py.typed"]
