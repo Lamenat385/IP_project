@@ -1,0 +1,4 @@
+ddgs>=9.0
+requests>=2.31
+ollama>=0.4
+PyMuPDF>=1.24
