@@ -22,3 +22,5 @@ module_pdf2md/nikolskiy._matan_1.md
 
 # Source documents (kept locally, not committed)
 *.pdf
+*.log
+*.jsonl
