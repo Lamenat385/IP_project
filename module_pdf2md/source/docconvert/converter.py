@@ -23,6 +23,7 @@ class ConvertOptions:
     ocr_engine: str = "auto"  # auto | rapidocr | easyocr | tesseract
     ocr_lang: tuple[str, ...] = ()
     tables: bool = True
+    formulas: bool = True
     cache_dir: Path | None = None
     images_scale: float = 1.0
     page_range: tuple[int, int] | None = None
@@ -91,6 +92,7 @@ def build_converter(options: ConvertOptions) -> DocumentConverter:
     device = resolve_device(options.device)
     pipeline = PdfPipelineOptions()
     pipeline.do_table_structure = options.tables
+    pipeline.do_formula_enrichment = options.formulas
     pipeline.images_scale = options.images_scale
     try:
         pipeline.accelerator_options.device = AcceleratorDevice(device)

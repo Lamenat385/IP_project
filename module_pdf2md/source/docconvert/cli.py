@@ -94,6 +94,21 @@ def build_parser() -> argparse.ArgumentParser:
             "torch build for 'cuda'."
         ),
     )
+
+    math = parser.add_argument_group("math / formulas")
+    math.add_argument(
+        "--formulas",
+        dest="formulas",
+        action="store_true",
+        default=True,
+        help="Recognize formulas and export them as LaTeX (default: on).",
+    )
+    math.add_argument(
+        "--no-formulas",
+        dest="formulas",
+        action="store_false",
+        help="Disable formula recognition (faster; formulas become placeholders).",
+    )
     parser.add_argument(
         "--pages",
         metavar="START-END",
@@ -114,6 +129,16 @@ def build_parser() -> argparse.ArgumentParser:
     clean.add_argument("--keep-noise", action="store_true", help="Keep punctuation-only noise lines.")
     clean.add_argument("--keep-references", action="store_true", help="Keep references/bibliography sections.")
     clean.add_argument("--no-collapse", action="store_true", help="Do not collapse whitespace / blank lines.")
+    clean.add_argument(
+        "--no-fix-symbols",
+        action="store_true",
+        help="Do not repair undecoded math glyphs (≠, ′, —, «») and HTML entities.",
+    )
+    clean.add_argument(
+        "--no-sanitize-formulas",
+        action="store_true",
+        help="Do not clean transliteration/loops out of recognized LaTeX formulas.",
+    )
 
     parser.add_argument("-q", "--quiet", action="store_true", help="Only log warnings and errors.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose (debug) logging.")
@@ -133,6 +158,8 @@ def _make_cleanup_options(args: argparse.Namespace) -> CleanupOptions:
             drop_noise_lines=False,
             drop_references=False,
             collapse_whitespace=False,
+            fix_symbols=False,
+            sanitize_formulas=False,
         )
     if args.keep_headers_footers:
         options.drop_headers_footers = False
@@ -150,6 +177,10 @@ def _make_cleanup_options(args: argparse.Namespace) -> CleanupOptions:
         options.drop_references = False
     if args.no_collapse:
         options.collapse_whitespace = False
+    if args.no_fix_symbols:
+        options.fix_symbols = False
+    if args.no_sanitize_formulas:
+        options.sanitize_formulas = False
     return options
 
 
@@ -194,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         ocr_engine=args.ocr_engine,
         ocr_lang=tuple(args.ocr_lang),
         tables=not args.no_tables,
+        formulas=args.formulas,
         cache_dir=Path(args.cache_dir) if args.cache_dir else None,
         page_range=_parse_pages(args.pages),
         device=args.device,

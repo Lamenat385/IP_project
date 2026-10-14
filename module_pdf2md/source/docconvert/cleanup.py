@@ -34,6 +34,10 @@ class CleanupOptions:
     drop_references: bool = True
     collapse_whitespace: bool = True
 
+    # math level
+    fix_symbols: bool = True
+    sanitize_formulas: bool = True
+
     # tuning
     edge_ratio: float = 0.14
     repeat_min_pages: int = 3
@@ -51,6 +55,8 @@ class CleanupStats:
     page_numbers: int = 0
     noise_lines: int = 0
     dehyphenated: int = 0
+    symbol_fixes: int = 0
+    formulas_repaired: int = 0
     references_cut: bool = False
     details: list[str] = field(default_factory=list)
 
@@ -68,6 +74,10 @@ class CleanupStats:
             parts.append(f"{self.noise_lines} noise")
         if self.dehyphenated:
             parts.append(f"{self.dehyphenated} hyphen joins")
+        if self.symbol_fixes:
+            parts.append(f"{self.symbol_fixes} symbol fixes")
+        if self.formulas_repaired:
+            parts.append(f"{self.formulas_repaired} formulas repaired")
         if self.references_cut:
             parts.append("references cut")
         return ", ".join(parts) if parts else "nothing removed"
@@ -264,6 +274,155 @@ _REFERENCES_RE = re.compile(
 )
 
 
+# Math-oriented repair -------------------------------------------------------
+
+# PDFs whose embedded fonts lack a Unicode cmap make docling emit U+FFFD for
+# glyphs such as "≠", "′" and the QED tombstone. They are repaired by context.
+
+_DISPLAY_FORMULA_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
+_INTERTEXT_RE = re.compile(r"\\intertext\s*\{.*?\}", re.DOTALL)
+# A pathological decoder loop: one short token repeated many times, optionally
+# separated by LaTeX control spaces ("\,", "\ ", "\;").
+_LOOP_RE = re.compile(r"(\S{1,8})(?:(?:\s|\\[ ,;])+\1\b){5,}")
+_DOTS_LOOP_RE = re.compile(r"(?:\\dots\s*){4,}")
+# A period-2+ loop of LaTeX commands, e.g. "\Omega \, \Pi \, \Omega \, \Pi ...".
+_SYMBOL_LOOP_RE = re.compile(r"(?:(?:\\[A-Za-z]+|\\[ ,;])[ \t]*){10,}")
+# Transliterated Cyrillic: runs of space-separated single letters/digits that
+# the formula model invents when a formula region overlaps prose.
+_TRANSLIT_RUN_RE = re.compile(
+    r"(?:\\text\s*\{\s*[A-Za-z0-9]\s*\}|[A-Za-z0-9])"
+    r"(?:(?:\s+|\\[ ,;]+|~)(?:\\text\s*\{\s*[A-Za-z0-9]\s*\}|[A-Za-z0-9])){4,}"
+)
+# "\text{...}" groups holding transliteration soup (e.g. "ha3i6abaTb6", "MOJ").
+_TEXT_GROUP_RE = re.compile(r"\\text\s*\{([^{}]*)\}")
+
+
+def _collapse_symbol_loop(match: re.Match[str]) -> str:
+    chunk = match.group(0)
+    commands = re.findall(r"\\[A-Za-z]+", chunk)
+    if commands and len(set(commands)) <= 4:
+        return " \\dots "
+    return chunk
+
+
+def _strip_transliteration(match: re.Match[str]) -> str:
+    letters = re.findall(r"[A-Za-z]", match.group(0))
+    return " " if len(letters) >= 4 else match.group(0)
+
+
+def _strip_text_transliteration(match: re.Match[str]) -> str:
+    inner = match.group(1)
+    # Digits glued to letters ("ha3i6abaTb6") or 3+ uppercase run ("MOJ",
+    # "HOBIM") are transliteration, never valid formula text.
+    if re.search(r"[0-9][A-Za-z]|[A-Za-z][0-9]|[A-Z]{3,}", inner):
+        return " "
+    return match.group(0)
+
+
+def _repair_symbols(text: str, stats: CleanupStats) -> str:
+    """Repair mojibake / undecoded math glyphs commonly found in PDFs."""
+
+    fixes = 0
+
+    # "≠": an undecoded glyph directly in front of "=" (e.g. "w <glyph>= 0").
+    text, n = re.subn(r"\ufffd\s*=", " \u2260 ", text)
+    fixes += n
+
+    # Summation: "<glyph>[upper] <low>=1"  ->  "∑_{low=1}^{upper}".
+    # Covers single and double sums, e.g. "<g>ni=1 <g>nj=1" -> "∑_{i=1}^{n} ∑_{j=1}^{n}".
+    def _sum_repl(match: re.Match[str]) -> str:
+        upper = match.group(1).strip().replace(" ", "")
+        low = match.group(2)
+        return f"\u2211_{{{low}=1}}^{{{upper}}}" if upper else f"\u2211_{{{low}=1}}"
+
+    text, n = re.subn(r"\ufffd\s*([a-z0-9\-\s]{0,6}?)\s*([a-z])\s*=\s*1(?![0-9])", _sum_repl, text)
+    fixes += n
+
+    # Square root immediately before a sum/product glyph: "<glyph>∑" -> "√∑".
+    text, n = re.subn(r"\ufffd(?=\s*[\u2211\u220f])", "\u221a", text)
+    fixes += n
+
+    # Integral: "<glyph> b a f(x) ..."  ->  "∫".
+    text, n = re.subn(r"\ufffd(?=\s+[a-z]\s+[a-z]\s+[a-z]\()", "\u222b", text)
+    fixes += n
+
+    # Square root before a tuple: "|a| = <glyph>(a, a)" -> "√(a, a)".
+    text, n = re.subn(r"\ufffd(?=\s*\(\s*[a-z]\s*,)", "\u221a", text)
+    fixes += n
+
+    # Prime: an undecoded glyph right after a variable/digit ("a<glyph>" -> "a′").
+    text, n = re.subn(r"([0-9A-Za-z])\s*\ufffd", lambda m: m.group(1) + "\u2032", text)
+    fixes += n
+
+    # QED tombstone: a lone undecoded glyph surrounded by spaces or alone on a line.
+    text, n = re.subn(r"(?<=\s)\ufffd(?=\s)", "\u25a1", text)
+    fixes += n
+    text, n = re.subn(r"(?m)^\s*\ufffd\s*$", "\u25a1", text)
+    fixes += n
+    text, n = re.subn(r"(?m)([.)])\s*\ufffd\s*$", lambda m: m.group(1) + " \u25a1", text)
+    fixes += n
+
+    # Missing parentheses in prose formulas: "|w|<glyph> cos" -> "|w|( cos",
+    # and a closing paren swallowed after ")": "sin(φ)<glyph>" -> "sin(φ))".
+    text, n = re.subn(r"\|\ufffd", "|(", text)
+    fixes += n
+    text, n = re.subn(r"\)\ufffd(?=\s|$|[,.;:)])", "))", text)
+    fixes += n
+
+    # Latin-1 mojibake for typographic dashes and guillemets.
+    dash = text.count("\u00d0")
+    if dash:
+        text = text.replace("\u00d0", "\u2014")
+        fixes += dash
+    quotes = text.count("\u00c7") + text.count("\u00c8")
+    if quotes:
+        text = text.replace("\u00c7", "\u00ab").replace("\u00c8", "\u00bb")
+        fixes += quotes
+
+    # Stray HTML entities leaking from docling's markdown exporter.
+    for entity, char in (("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&")):
+        count = text.count(entity)
+        if count:
+            text = text.replace(entity, char)
+            fixes += count
+
+    stats.symbol_fixes += fixes
+    return text
+
+
+def _sanitize_formulas(text: str, stats: CleanupStats) -> str:
+    """Remove decode loops and transliterated prose from display formulas."""
+
+    def clean(formula: str) -> tuple[str, bool]:
+        original = formula
+        formula = _INTERTEXT_RE.sub(" ", formula)
+        formula = _LOOP_RE.sub(lambda m: m.group(1) + " \u2026", formula)
+        formula = _DOTS_LOOP_RE.sub(lambda m: "\\dots ", formula)
+        formula = _SYMBOL_LOOP_RE.sub(_collapse_symbol_loop, formula)
+        formula = _TRANSLIT_RUN_RE.sub(_strip_transliteration, formula)
+        formula = _TEXT_GROUP_RE.sub(_strip_text_transliteration, formula)
+        formula = re.sub(r"[ \t]{2,}", " ", formula).strip()
+        return formula, formula != original
+
+    repaired = 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal repaired
+        body, changed = clean(match.group(1))
+        if changed:
+            repaired += 1
+        if not body:
+            return ""
+        return f"$$\n{body}\n$$"
+
+    text = _DISPLAY_FORMULA_RE.sub(repl, text)
+    # Catch any dangling \intertext the block pass could not bracket.
+    text = _INTERTEXT_RE.sub(" ", text)
+    text = text.replace("\\intertext", "")
+    stats.formulas_repaired += repaired
+    return text
+
+
 def clean_text(text: str, options: CleanupOptions, stats: CleanupStats | None = None) -> str:
     """Clean a markdown / plain-text export produced by docling."""
 
@@ -273,6 +432,12 @@ def clean_text(text: str, options: CleanupOptions, stats: CleanupStats | None = 
         return text
 
     text = _PLACEHOLDER_COMMENT_RE.sub("", text)
+
+    if options.fix_symbols:
+        text = _repair_symbols(text, stats)
+
+    if options.sanitize_formulas:
+        text = _sanitize_formulas(text, stats)
 
     if options.dehyphenate:
         text, count = _DEHYPHEN_RE.subn(r"\1\2", text)
@@ -297,7 +462,11 @@ def clean_text(text: str, options: CleanupOptions, stats: CleanupStats | None = 
             continue
 
         is_table = "|" in stripped
+        is_math_fence = set(stripped.strip()) <= {"$"} and stripped.strip()
 
+        if is_math_fence:
+            out.append(stripped)
+            continue
         if _RULE_RE.match(stripped) and not is_table:
             continue
         if options.drop_page_numbers and not is_table and (
