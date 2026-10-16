@@ -20,7 +20,9 @@ converted.md
 converted.txt
 module_pdf2md/nikolskiy._matan_1.md
 
-# Source documents (kept locally, not committed)
+# Source documents (kept locally, not committed),
+# except PDFs placed in docs/ (e.g. project documentation)
 *.pdf
+!docs/**/*.pdf
 *.log
 *.jsonl
