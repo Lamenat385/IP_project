@@ -9,8 +9,8 @@ virtualenv, test suite, linter, formatter, or CI. Do not invent commands.
 - `module_searcher/` — implemented: DuckDuckGo search + Ollama relevance filter +
   PDF download/scan detection. Entrypoint `run.py`.
 - `module_pdf2md/` — implemented: PDF → one cleaned `.md`/`.txt` (`docconvert`).
-- `module_database_maker/`, `module_learning/`, `module_web/`, `module_bench/` —
-  stubs (only `source/__init__.py` + empty `requirements.txt`).
+- `module_database_maker/`, `module_learning/`, `module_tools/`, `module_web/`,
+  `module_bench/` — stubs (only `source/__init__.py` + empty `requirements.txt`).
 
 Never commit `*.pdf`, `*.gguf`, `.venv/`, `.docling-cache/`, or generated
 `converted.md`/`converted.txt` (see `.gitignore`).
