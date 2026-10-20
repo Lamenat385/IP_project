@@ -60,6 +60,7 @@ IP_project/
 │   └── Qwen3.8-27B-UD-Q4_K_M.gguf   # ~16 ГБ, локальная модель, в git НЕ хранится
 │
 ├── module_database_maker/      # ЗАГОТОВКА (только source/__init__.py, requirements пуст)
+├── module_tools/               # ЗАГОТОВКА (только source/__init__.py, requirements пуст)
 ├── module_web/                 # ЗАГОТОВКА (только source/__init__.py, requirements пуст)
 └── module_bench/               # ЗАГОТОВКА (только source/__init__.py, requirements пуст)
 ```
@@ -184,6 +185,7 @@ pip install -e .
 - `module_database_maker/` — построение базы данных из собранного корпуса;
 - `module_learning/` — обучение/работа с моделью (рядом лежит локальная
   `Qwen3.8-27B-UD-Q4_K_M.gguf`, ~16 ГБ);
+- `module_tools/` — инструменты обращения LLM к графу конспекта;
 - `module_web/` — веб-интерфейс;
 - `module_bench/` — бенчмарки/сравнение моделей.
 
